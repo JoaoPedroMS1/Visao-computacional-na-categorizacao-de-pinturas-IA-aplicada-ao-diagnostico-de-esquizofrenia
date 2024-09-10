@@ -13,18 +13,26 @@ from tensorflow.keras import layers
 from tensorflow.keras import models
 from tensorflow.keras.callbacks import ModelCheckpoint, ReduceLROnPlateau
 from sklearn.metrics import confusion_matrix
+import matplotlib.pyplot as plt
+from mlxtend.plotting import plot_confusion_matrix
 
-# Caminhos e extração dos arquivos
-caminho_zip = '/content/Diretorio'
-caminho_extracao = '/content/dataset'
+caminho_zip = '/diretorio'
+caminho_extracao = '/diretorio_extracao'
 with zipfile.ZipFile(caminho_zip, 'r') as zip_ref:
     zip_ref.extractall(caminho_extracao)
 
-# Funções de processamento de imagem e carregamento dos dados
 def select_image(filename):
     image = Image.open(filename)
     image = image.convert('RGB')
+
+    width, height = image.size
+
+    new_height = int(height * 0.8)
+
+    image = image.crop((0, 0, width, new_height))
+
     image = image.resize((300, 300))
+
     return np.asarray(image)
 
 def load_class(diretorio, classe, imagens, labels, filepaths):
@@ -33,36 +41,31 @@ def load_class(diretorio, classe, imagens, labels, filepaths):
         try:
             imagens.append(select_image(path))
             labels.append(classe)
-            filepaths.append(path)  # Armazena o caminho da imagem
+            filepaths.append(path)
         except:
             print("Erro ao ler imagem {}".format(path))
     return imagens, labels, filepaths
 
 def select_data_set(diretorio_caso, diretorio_controle):
     imagens, labels, filepaths = list(), list(), list()
-    # Carregar imagens do grupo caso
     imagens, labels, filepaths = load_class(diretorio_caso, 'caso', imagens, labels, filepaths)
-    # Carregar imagens do grupo controle
     imagens, labels, filepaths = load_class(diretorio_controle, 'controle', imagens, labels, filepaths)
     return imagens, labels, filepaths
 
 # Parâmetros e variáveis
-batch_size = 2
+batch_size = 32
 input_shape = (300, 300, 3)
 random_state = 42
 alpha = 1e-5
 epoch = 25
-num_runs = 10  # Número de execuções
-accs, sens, specs = [], [], []  # Listas para armazenar os resultados
+num_runs = 10  
+accs, sens, specs = [], [], []  
 
-# Diretórios dos grupos
-dataset_caso = '/content/dataset/diretorio_caso'
-dataset_controle = '/content/dataset/diretorio_controle'
+dataset_caso = '/diretorio_caso'
+dataset_controle = '/content/dataset/PEP-controle/diretorio_controle'
 
-# Carregar imagens e labels
 imagens, labels, filepaths = select_data_set(dataset_caso, dataset_controle)
 
-# Normalizar as imagens e binarizar os labels
 imagens = np.array(imagens) / 255.0
 labels = np.array(labels)
 
@@ -70,7 +73,6 @@ lb = LabelBinarizer()
 labels = lb.fit_transform(labels)
 labels = to_categorical(labels)
 
-# Função para aplicar data augmentation apenas nas imagens do grupo controle
 def augment_control_images(images, labels, filepaths, augment_factor=3):
     control_images = [img for img, label in zip(images, labels) if np.argmax(label) == 1]
     control_labels = [label for label in labels if np.argmax(label) == 1]
@@ -88,15 +90,14 @@ def augment_control_images(images, labels, filepaths, augment_factor=3):
     )
 
     for img, label, path in zip(control_images, control_labels, control_filepaths):
-        img = np.expand_dims(img, 0) 
+        img = np.expand_dims(img, 0)
         it = datagen.flow(img, batch_size=1)
-        for _ in range(augment_factor - 1):  # Não precisa gerar a imagem original
+        for _ in range(augment_factor - 1):
             augmented_image = next(it)[0].astype(np.uint8)
             augmented_images.append(augmented_image)
             augmented_labels.append(label)
-            augmented_filepaths.append(path)  # Manter o caminho original
+            augmented_filepaths.append(path)
 
-    # Expandir a lista de imagens, labels e filepaths
     images = np.concatenate([images, np.array(augmented_images)], axis=0)
     labels = np.concatenate([labels, np.array(augmented_labels)], axis=0)
     filepaths.extend(augmented_filepaths)  # Não precisa converter para np.array
@@ -105,10 +106,8 @@ def augment_control_images(images, labels, filepaths, augment_factor=3):
 
     return images, labels, filepaths
 
-# Aplicar data augmentation às imagens do grupo controle
 imagens, labels, filepaths = augment_control_images(imagens, labels, filepaths)
 
-# Função para aplicar data augmentation em todas as imagens
 def augment_all_images(images, labels, filepaths, augment_factor=20):
     print(f"Antes da ampliação: {len(images)} imagens totais")
 
@@ -131,7 +130,6 @@ def augment_all_images(images, labels, filepaths, augment_factor=20):
             augmented_labels.append(label)
             augmented_filepaths.append(path)  # Manter o caminho original
 
-    # Expandir a lista de imagens, labels e filepaths
     images = np.concatenate([images, np.array(augmented_images)], axis=0)
     labels = np.concatenate([labels, np.array(augmented_labels)], axis=0)
     filepaths.extend(augmented_filepaths)  # Não precisa converter para np.array
@@ -140,25 +138,21 @@ def augment_all_images(images, labels, filepaths, augment_factor=20):
 
     return images, labels, filepaths
 
-# Aplicar data augmentation a todas as imagens
 augment_factor = 20  # Fator de aumento, ajuste conforme necessário
 imagens, labels, filepaths = augment_all_images(imagens, labels, filepaths)
 
 for run in range(num_runs):
     print(f"Execução {run + 1}/{num_runs}")
-    
-    # Callbacks para salvar o melhor modelo e ajustar a taxa de aprendizado
+
     filepath = f"Modelo_salvo_{run + 1}.keras"
     checkpoint = ModelCheckpoint(filepath, monitor='val_accuracy', verbose=1, save_best_only=True, mode='max')
     lr_reduce = ReduceLROnPlateau(monitor='val_accuracy', factor=0.1, min_delta=alpha, patience=5, verbose=1)
     callbacks = [checkpoint, lr_reduce]
 
-    # Dividir o conjunto de dados em treino e teste, mantendo os caminhos dos arquivos
     (trainX, testX, trainY, testY, train_paths, test_paths) = train_test_split(
         imagens, labels, filepaths, test_size=0.25, stratify=labels, random_state=run
     )
 
-    # Transfer Learning com VGG19
     conv_base = VGG19(weights='imagenet', include_top=False, input_shape=input_shape)
     conv_base.trainable = True
     set_trainable = False
@@ -171,7 +165,6 @@ for run in range(num_runs):
         else:
             layer.trainable = False
 
-    # Construção do modelo
     model = models.Sequential()
     model.add(conv_base)
     model.add(layers.GlobalAveragePooling2D())
@@ -181,42 +174,54 @@ for run in range(num_runs):
     model.add(layers.Dropout(0.9))
     model.add(layers.Dense(2, activation='softmax'))
 
-    # Compilação do modelo
     model.compile(loss='binary_crossentropy',
                   optimizer='adam',
                   metrics=['accuracy'])
 
-    # Treinamento do modelo
     history = model.fit(trainX, trainY,
                         validation_data=(testX, testY),
                         callbacks=callbacks,
                         epochs=epoch,
                         batch_size=batch_size)
 
-    # Avaliação e cálculo da matriz de confusão
-    pred = model.predict(testX)
+    plt.figure(figsize=(12, 5))
+
+    plt.subplot(1, 2, 1)
+    plt.plot(history.history['accuracy'], label='Treinamento')
+    plt.plot(history.history['val_accuracy'], label='Validação')
+    plt.title('Acurácia')
+    plt.xlabel('Épocas')
+    plt.ylabel('Acurácia')
+    plt.legend()
+
+    plt.subplot(1, 2, 2)
+    plt.plot(history.history['loss'], label='Treinamento')
+    plt.plot(history.history['val_loss'], label='Validação')
+    plt.title('Perda')
+    plt.xlabel('Épocas')
+    plt.ylabel('Perda')
+    plt.legend()
+
+    plt.show()
+
+    pred = model.predict(testX, batch_size=batch_size)
     pred = np.argmax(pred, axis=1)
-    y_true = np.argmax(testY, axis=1)
+    testY_max = np.argmax(testY, axis=1)
+    cm = confusion_matrix(testY_max, pred)
+    plot_confusion_matrix(cm, class_names=lb.classes_)
 
-    cm = confusion_matrix(y_true, pred)
-    total = sum(sum(cm))
-    acc = (cm[0,0] + cm[1,1]) / total
-    sensitivity = cm[0,0] / (cm[0,0] + cm[0,1])
-    specificity = cm[1,1] / (cm[1,0] + cm[1,1])
+    tn, fp, fn, tp = cm.ravel()
+    accuracy = (tp + tn) / (tp + tn + fp + fn)
+    sensitivity = tp / (tp + fn)
+    specificity = tn / (tn + fp)
 
-    accs.append(acc)
+    accs.append(accuracy)
     sens.append(sensitivity)
     specs.append(specificity)
 
-    print(f"Acurácia da execução {run + 1}: {acc:.4f}")
-    print(f"Sensibilidade da execução {run + 1}: {sensitivity:.4f}")
-    print(f"Especificidade da execução {run + 1}: {specificity:.4f}")
+accs_mean, sens_mean, specs_mean = np.mean(accs), np.mean(sens), np.mean(specs)
+accs_std, sens_std, specs_std = np.std(accs), np.std(sens), np.std(specs)
 
-# Cálculo da média e do desvio padrão
-print(f"Resultados após {num_runs} execuções:")
-print(f"Média da acurácia: {np.mean(accs):.4f}")
-print(f"Desvio padrão da acurácia: {np.std(accs):.4f}")
-print(f"Média da sensibilidade: {np.mean(sens):.4f}")
-print(f"Desvio padrão da sensibilidade: {np.std(sens):.4f}")
-print(f"Média da especificidade: {np.mean(specs):.4f}")
-print(f"Desvio padrão da especificidade: {np.std(specs):.4f}")
+print(f"Acurácia média: {accs_mean:.4f} ± {accs_std:.4f}")
+print(f"Sensibilidade média: {sens_mean:.4f} ± {sens_std:.4f}")
+print(f"Especificidade média: {specs_mean:.4f} ± {specs_std:.4f}")
