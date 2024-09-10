@@ -4,32 +4,24 @@ from tensorflow.keras.applications.mobilenet_v2 import preprocess_input
 import numpy as np
 import os
 
-# Caminho do modelo salvo
-modelo_salvo_path = "/content/modelo_salvo.keras"
+modelo_salvo_path = "/modelo_salvo.keras"
 model = load_model(modelo_salvo_path)
 
-# Diretório onde estão as pastas de imagens usadas no treino
-treinamento_dir = "/content/dados_de_treinamento"
+treinamento_dir = "/dados_de_treinamento"
 
-# Carrega os nomes das classes a partir dos diretórios de treinamento
 class_labels = sorted(os.listdir(treinamento_dir))
 
-# Caminho da imagem de teste
-test_image_path = '/content/nova_imagem'
+test_image_path = '/nova_imagem'
 
-# Pré-processamento da imagem
 test_image = image.load_img(test_image_path, target_size=(300, 300))
 test_image_array = image.img_to_array(test_image)
 test_image_array = np.expand_dims(test_image_array, axis=0)
 test_image_array = preprocess_input(test_image_array)
 
-# Realiza a predição
 predictions = model.predict(test_image_array)
 
-# Identifica a classe prevista
 predicted_class = np.argmax(predictions)
 
-# Obtém o rótulo da classe prevista
 predicted_class_label = class_labels[predicted_class]
 
 print(f'A imagem pertence à seguinte categoria: {predicted_class_label}')
