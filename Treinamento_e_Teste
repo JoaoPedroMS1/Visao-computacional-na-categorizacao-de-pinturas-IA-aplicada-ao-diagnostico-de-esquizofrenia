@@ -52,7 +52,6 @@ def select_data_set(diretorio_caso, diretorio_controle):
     imagens, labels, filepaths = load_class(diretorio_controle, 'controle', imagens, labels, filepaths)
     return imagens, labels, filepaths
 
-# Parâmetros e variáveis
 batch_size = 32
 input_shape = (300, 300, 3)
 random_state = 42
@@ -62,7 +61,7 @@ num_runs = 10
 accs, sens, specs = [], [], []  
 
 dataset_caso = '/diretorio_caso'
-dataset_controle = '/content/dataset/PEP-controle/diretorio_controle'
+dataset_controle = '/diretorio_controle'
 
 imagens, labels, filepaths = select_data_set(dataset_caso, dataset_controle)
 
@@ -124,21 +123,21 @@ def augment_all_images(images, labels, filepaths, augment_factor=20):
     for img, label, path in zip(images, labels, filepaths):
         img = np.expand_dims(img, 0)
         it = datagen.flow(img, batch_size=1)
-        for _ in range(augment_factor - 1):  # Não precisa gerar a imagem original
+        for _ in range(augment_factor - 1):
             augmented_image = next(it)[0].astype(np.uint8)
             augmented_images.append(augmented_image)
             augmented_labels.append(label)
-            augmented_filepaths.append(path)  # Manter o caminho original
+            augmented_filepaths.append(path)
 
     images = np.concatenate([images, np.array(augmented_images)], axis=0)
     labels = np.concatenate([labels, np.array(augmented_labels)], axis=0)
-    filepaths.extend(augmented_filepaths)  # Não precisa converter para np.array
+    filepaths.extend(augmented_filepaths)
 
     print(f"Após a ampliação: {len(images)} imagens totais")
 
     return images, labels, filepaths
 
-augment_factor = 20  # Fator de aumento, ajuste conforme necessário
+augment_factor = 20
 imagens, labels, filepaths = augment_all_images(imagens, labels, filepaths)
 
 for run in range(num_runs):
