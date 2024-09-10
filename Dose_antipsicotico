@@ -1,0 +1,190 @@
+!pip install statsmodels
+import zipfile
+import os
+import numpy as np
+from PIL import Image
+import tensorflow as tf
+from tensorflow.keras.preprocessing.image import ImageDataGenerator
+from tensorflow.keras.layers import Input, Dense, Dropout, GlobalAveragePooling2D
+from tensorflow.keras.models import Model
+from tensorflow.keras.optimizers import Adam
+from tensorflow.keras.applications import VGG19
+from tensorflow.keras.applications.vgg19 import preprocess_input
+from sklearn.model_selection import train_test_split
+from sklearn.metrics import mean_squared_error, mean_absolute_error
+import matplotlib.pyplot as plt
+import re
+import pandas as pd
+import statsmodels.api as sm
+from statsmodels.formula.api import ols
+
+caminho_zip = '/diretorio.zip'
+caminho_extracao = '/diretorio_extracao'
+with zipfile.ZipFile(caminho_zip, 'r') as zip_ref:
+    zip_ref.extractall(caminho_extracao)
+
+def load_data_from_directory(directory_path, augmented_factor=1):
+    images = []
+    labels = []
+    filenames = []
+
+    datagen = ImageDataGenerator(
+        rotation_range=20,
+        zoom_range=0.2,
+        width_shift_range=0.2,
+        height_shift_range=0.2,
+        shear_range=0.2,
+    )
+
+    for filename in os.listdir(directory_path):
+        if filename.endswith(".jpg") or filename.endswith(".png"):
+            try:
+                dose_str = re.findall(r"[-+]?\d*\.\d+|\d+", filename)[0] 
+                dose = float(dose_str)
+
+                img_path = os.path.join(directory_path, filename)
+                img = Image.open(img_path)
+
+                width, height = img.size
+                new_height = int(height * 0.8)
+                img = img.crop((0, 0, width, new_height))
+
+                img = img.resize((300, 300))
+                img = np.array(img)
+
+                img = preprocess_input(img)
+
+                if img.shape == (300, 300, 3):
+                    images.append(img)
+                    labels.append(dose)
+                    filenames.append(filename)
+
+                    img = np.expand_dims(img, axis=0)  
+                    aug_iter = datagen.flow(img, batch_size=1)
+
+                    for i in range(augmented_factor - 1):
+                        aug_img = next(aug_iter)[0].astype(np.float32)
+                        images.append(aug_img)
+                        labels.append(dose)
+                        filenames.append(f"{filename}_augmented_{i+1}")
+
+            except (ValueError, IndexError) as e:
+                print(f"Skipping file {filename} due to unexpected format. Error: {e}")
+
+    images = np.array(images)
+    labels = np.array(labels)
+
+    return images, labels, filenames
+
+def build_medication_model():
+    base_model = VGG19(weights='imagenet', include_top=False, input_shape=(300, 300, 3))
+
+    for layer in base_model.layers:
+        layer.trainable = False
+
+    x = base_model.output
+    x = GlobalAveragePooling2D()(x)
+    x = Dense(1024, activation='relu')(x)
+    x = Dropout(0.5)(x)
+    x = Dense(512, activation='relu')(x)
+    x = Dropout(0.5)(x)
+    outputs = Dense(1)(x)
+
+    model = Model(inputs=base_model.input, outputs=outputs)
+    return model
+
+def perform_ancova(real_labels, predicted_labels):
+    df = pd.DataFrame({
+        'Dose_Real': np.tile(real_labels, 2),
+        'Dose_Prevista': np.concatenate([real_labels, predicted_labels.flatten()]),
+        'Grupo': ['Ideal'] * len(real_labels) + ['Previsto'] * len(predicted_labels)
+    })
+
+    df['Intercepto'] = 1
+
+    formula = 'Dose_Prevista ~ Dose_Real * Grupo'
+    model = ols(formula, data=df).fit()
+
+    print(model.summary())
+
+    interaction_p_value = model.pvalues['Dose_Real:Grupo[T.Previsto]']
+
+    if interaction_p_value < 0.05:
+        print(f"Diferença significativa nas inclinações (p = {interaction_p_value:.4f}).")
+    else:
+        intercept_p_value = model.pvalues['Grupo[T.Previsto]']
+        if intercept_p_value < 0.05:
+            print(f"Diferença significativa nos interceptos (p = {intercept_p_value:.4f}).")
+        else:
+            print("Não há diferença significativa entre as retas.")
+
+directory_path = '/diretorio_extracao'
+
+augmented_factor = 45
+
+images, labels, filenames = load_data_from_directory(directory_path, augmented_factor=augmented_factor)
+
+print(f"Total de imagens geradas após Data Augmentation: {len(images)}")
+
+if len(images) == 0:
+    raise ValueError("Nenhuma imagem foi carregada. Verifique o formato dos nomes dos arquivos e o diretório.")
+
+num_runs = 10
+all_histories = []
+
+for run in range(num_runs):
+    print(f"Execução {run + 1}/{num_runs}")
+
+    train_images, val_images, train_labels, val_labels, train_filenames, val_filenames = train_test_split(
+        images, labels, filenames, test_size=0.25, random_state=run
+    )
+
+    model = build_medication_model()
+
+    model.compile(optimizer=Adam(learning_rate=0.001),
+                  loss='mean_squared_error')
+
+    callbacks = [
+        tf.keras.callbacks.LearningRateScheduler(lambda epoch: 0.001 * 0.5 ** (epoch // 10))
+    ]
+
+    history = model.fit(train_images, train_labels,
+                        epochs=25,
+                        batch_size=32,
+                        validation_data=(val_images, val_labels),
+                        callbacks=callbacks)
+
+    all_histories.append(history.history)
+
+    val_predictions = model.predict(val_images)
+
+    val_predictions = np.maximum(val_predictions, 0)
+
+    mse = mean_squared_error(val_labels, val_predictions)
+    mae = mean_absolute_error(val_labels, val_predictions)
+    print(f"Execução {run + 1} - MSE: {mse:.4f}, MAE: {mae:.4f}")
+
+    plt.figure(figsize=(10, 6))
+    plt.scatter(val_labels, val_predictions, color='blue')
+    plt.plot([min(val_labels), max(val_labels)], [min(val_labels), max(val_labels)], color='red', linestyle='--', label='Reta Ideal')
+
+    coef = np.polyfit(val_labels, val_predictions.flatten(), 1)
+    poly1d_fn = np.poly1d(coef)
+    plt.plot(val_labels, poly1d_fn(val_labels), color='green', label=f'Reta Previsão: y = {coef[0]:.2f}x + {coef[1]:.2f}')
+
+    plt.title(f'Comparação entre Doses Reais e Previstas - Execução {run + 1}')
+    plt.xlabel('Dose Real')
+    plt.ylabel('Dose Prevista')
+    plt.legend()
+    plt.show()
+
+    perform_ancova(val_labels, val_predictions)
+
+    plt.figure(figsize=(10, 6))
+    plt.plot(history.history['loss'], label='Perda de Treinamento')
+    plt.plot(history.history['val_loss'], label='Perda de Validação')
+    plt.title(f'Gráfico de Perda - Execução {run + 1}')
+    plt.xlabel('Época')
+    plt.ylabel('Perda')
+    plt.legend()
+    plt.show()
