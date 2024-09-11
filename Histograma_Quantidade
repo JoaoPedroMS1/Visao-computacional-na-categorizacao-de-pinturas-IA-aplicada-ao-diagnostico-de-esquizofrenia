@@ -1,0 +1,92 @@
+import os
+import matplotlib.pyplot as plt
+import numpy as np
+from PIL import Image
+import zipfile
+
+caminho_zip = '/diretorio.zip'
+caminho_extracao = '/diretorio_extracao'
+with zipfile.ZipFile(caminho_zip, 'r') as zip_ref:
+    zip_ref.extractall(caminho_extracao)
+
+def arredondar_cor(cor_pixel, cores_arredondamento):
+    cor_arredondada = min(cores_arredondamento, key=lambda c: np.linalg.norm(np.array(cor_pixel) - np.array(c)))
+    return cor_arredondada
+
+def calcular_histograma(imagem, cores_arredondamento):
+    imagem = imagem.resize((300, 300))
+
+    imagem_rgb = imagem.convert("RGB")
+
+    contagem_cores = {}
+
+    for x in range(imagem.width):
+        for y in range(imagem.height):
+            cor_pixel = tuple(imagem_rgb.getpixel((x, y)))
+
+            cor_arredondada = arredondar_cor(cor_pixel, cores_arredondamento)
+
+            contagem_cores[cor_arredondada] = contagem_cores.get(cor_arredondada, 0) + 1
+
+    return contagem_cores
+
+def calcular_histograma_diretorio(diretorio, cores_arredondamento):
+    contagem_total = {}
+
+    for nome_arquivo in os.listdir(diretorio):
+        caminho_imagem = os.path.join(diretorio, nome_arquivo)
+
+        if caminho_imagem.endswith(('.png', '.jpg', '.jpeg')):
+            imagem = Image.open(caminho_imagem)
+            contagem_cores = calcular_histograma(imagem, cores_arredondamento)
+
+            for cor, quantidade in contagem_cores.items():
+                contagem_total[cor] = contagem_total.get(cor, 0) + quantidade
+
+    return contagem_total
+
+def gerar_histograma(contagem_cores):
+    contagem_cores_plot = {cor: qtd for cor, qtd in contagem_cores.items() if cor != (255, 255, 255)}
+
+    rotulos_x = [str(cor) for cor in contagem_cores_plot.keys()]
+
+    cores_rgb = np.array(list(contagem_cores_plot.keys())) / 255.0
+
+    plt.bar(rotulos_x, list(contagem_cores_plot.values()), color=cores_rgb, alpha=0.7)
+
+    plt.xlabel('Cores RGB')
+    plt.ylabel('Quantidade de Pixels')
+    plt.title('Histograma de Todas as Cores (exceto branco)')
+
+    plt.xticks(rotation=45, ha='right')
+
+    for cor, quantidade_pixels in contagem_cores.items():
+        print(f"A cor {cor} tem {quantidade_pixels} pixels")
+
+    plt.show()
+
+    if (255, 255, 255) in contagem_cores:
+        print(f"A cor branca (255, 255, 255) tem {contagem_cores[(255, 255, 255)]} pixels")
+
+diretorio_imagens = '/diretorio_extracao'
+
+cores_arredondamento = [(0, 0, 0), (0, 0, 85), (0, 0, 170), (0, 0, 255),
+ (0, 85, 0), (0, 85, 85), (0, 85, 170), (0, 85, 255),
+ (0, 170, 0), (0, 170, 85), (0, 170, 170), (0, 170, 255),
+ (0, 255, 0), (0, 255, 85), (0, 255, 170), (0, 255, 255),
+ (85, 0, 0), (85, 0, 85), (85, 0, 170), (85, 0, 255),
+ (85, 85, 0), (85, 85, 85), (85, 85, 170), (85, 85, 255),
+ (85, 170, 0), (85, 170, 85), (85, 170, 170), (85, 170, 255),
+ (85, 255, 0), (85, 255, 85), (85, 255, 170), (85, 255, 255),
+ (170, 0, 0), (170, 0, 85), (170, 0, 170), (170, 0, 255),
+ (170, 85, 0), (170, 85, 85), (170, 85, 170), (170, 85, 255),
+ (170, 170, 0), (170, 170, 85), (170, 170, 170), (170, 170, 255),
+ (170, 255, 0), (170, 255, 85), (170, 255, 170), (170, 255, 255),
+ (255, 0, 0), (255, 0, 85), (255, 0, 170), (255, 0, 255),
+ (255, 85, 0), (255, 85, 85), (255, 85, 170), (255, 85, 255),
+ (255, 170, 0), (255, 170, 85), (255, 170, 170), (255, 170, 255),
+ (255, 255, 0), (255, 255, 85), (255, 255, 170), (255, 255, 255)]
+
+contagem_total = calcular_histograma_diretorio(diretorio_imagens, cores_arredondamento)
+
+gerar_histograma(contagem_total)
