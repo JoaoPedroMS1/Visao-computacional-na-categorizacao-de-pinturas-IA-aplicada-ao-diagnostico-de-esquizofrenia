@@ -1,0 +1,111 @@
+from IPython.display import display, Javascript
+import time
+import os
+import numpy as np
+from PIL import Image
+import zipfile
+import threading
+import matplotlib.pyplot as plt
+from scipy.stats import ttest_ind
+
+def evitar_inatividade(interval=60):
+    while True:
+        time.sleep(interval)
+        display(Javascript('console.log("Manter sessão ativa...")'))
+
+t = threading.Thread(target=evitar_inatividade)
+t.start()
+
+caminho_zip = '/diretorio.zip'
+caminho_extracao = '/diretorio_extracao'
+with zipfile.ZipFile(caminho_zip, 'r') as zip_ref:
+    zip_ref.extractall(caminho_extracao)
+
+def redimensionar_imagem(imagem, tamanho=(300, 300)):
+    return imagem.resize(tamanho)
+
+def arredondar_cor(cor_pixel, cores_arredondamento):
+    cor_arredondada = min(cores_arredondamento, key=lambda c: np.linalg.norm(np.array(cor_pixel) - np.array(c)))
+    return cor_arredondada
+
+def calcular_histograma(imagem, cores_arredondamento):
+    imagem = redimensionar_imagem(imagem)
+    imagem_rgb = imagem.convert("RGB")
+    contagem_cores = {cor: 0 for cor in cores_arredondamento}
+    total_pixels = imagem.width * imagem.height
+
+    for x in range(imagem.width):
+        for y in range(imagem.height):
+            cor_pixel = tuple(imagem_rgb.getpixel((x, y)))
+            cor_arredondada = arredondar_cor(cor_pixel, cores_arredondamento)
+            contagem_cores[cor_arredondada] += 1
+
+    proporcoes_cores = {cor: contagem / total_pixels for cor, contagem in contagem_cores.items()}
+    return proporcoes_cores
+
+def calcular_histograma_conjunto(diretorio, cores_arredondamento):
+    proporcoes_totais = {cor: [] for cor in cores_arredondamento}
+
+    for nome_imagem in os.listdir(diretorio):
+        if nome_imagem.endswith('.jpg') or nome_imagem.endswith('.png'):
+            caminho_imagem = os.path.join(diretorio, nome_imagem)
+            imagem = Image.open(caminho_imagem)
+            proporcoes_cores = calcular_histograma(imagem, cores_arredondamento)
+
+            for cor, proporcao in proporcoes_cores.items():
+                proporcoes_totais[cor].append(proporcao)
+
+    return proporcoes_totais
+
+def calcular_valores_p(contagem_controle, contagem_caso):
+    valores_p = {}
+    for cor in contagem_controle:
+        _, p_value = ttest_ind(contagem_controle[cor], contagem_caso[cor], equal_var=False)
+        valores_p[cor] = p_value
+    return valores_p
+
+def plotar_valores_p(valores_p):
+    cores = list(valores_p.keys())
+    p_values = list(valores_p.values())
+
+    sorted_indices = np.argsort(p_values)
+    cores_ordenadas = [cores[i] for i in sorted_indices]
+    p_values_ordenados = [p_values[i] for i in sorted_indices]
+
+    plt.bar(range(len(cores_ordenadas)), p_values_ordenados, color=np.array(cores_ordenadas) / 255.0)
+    plt.axhline(y=0.05, color='r', linestyle='--')
+    plt.xticks(range(len(cores_ordenadas)), cores_ordenadas, rotation=90)
+    plt.ylabel('Valor de p')
+    plt.title('Valores de p para cada cor')
+    plt.show()
+
+cores_arredondamento = [(0, 0, 0), (0, 0, 85), (0, 0, 170), (0, 0, 255),
+                        (0, 85, 0), (0, 85, 85), (0, 85, 170), (0, 85, 255),
+                        (0, 170, 0), (0, 170, 85), (0, 170, 170), (0, 170, 255),
+                        (0, 255, 0), (0, 255, 85), (0, 255, 170), (0, 255, 255),
+                        (85, 0, 0), (85, 0, 85), (85, 0, 170), (85, 0, 255),
+                        (85, 85, 0), (85, 85, 85), (85, 85, 170), (85, 85, 255),
+                        (85, 170, 0), (85, 170, 85), (85, 170, 170), (85, 170, 255),
+                        (85, 255, 0), (85, 255, 85), (85, 255, 170), (85, 255, 255),
+                        (170, 0, 0), (170, 0, 85), (170, 0, 170), (170, 0, 255),
+                        (170, 85, 0), (170, 85, 85), (170, 85, 170), (170, 85, 255),
+                        (170, 170, 0), (170, 170, 85), (170, 170, 170), (170, 170, 255),
+                        (170, 255, 0), (170, 255, 85), (170, 255, 170), (170, 255, 255),
+                        (255, 0, 0), (255, 0, 85), (255, 0, 170), (255, 0, 255),
+                        (255, 85, 0), (255, 85, 85), (255, 85, 170), (255, 85, 255),
+                        (255, 170, 0), (255, 170, 85), (255, 170, 170), (255, 170, 255),
+                        (255, 255, 0), (255, 255, 85), (255, 255, 170), (255, 255, 255)]
+
+diretorio_controle = '/diretorio_controle'
+diretorio_caso = '/diretorio_caso'
+
+contagem_controle = calcular_histograma_conjunto(diretorio_controle, cores_arredondamento)
+contagem_caso = calcular_histograma_conjunto(diretorio_caso, cores_arredondamento)
+
+valores_p = calcular_valores_p(contagem_controle, contagem_caso)
+
+print("Valores de p para cada cor:")
+for cor, p_value in valores_p.items():
+    print(f"Cor {cor}: Valor de p = {p_value}")
+
+plotar_valores_p(valores_p)
